@@ -10,15 +10,35 @@ type SimulationResult = {
   bitsAlice: Bit[];
   basesAlice: Basis[];
   statesAlice: QuantumState[];
+
+  eveActive: boolean;
+  basesEve?: Basis[];
+  bitsEve?: Bit[];
+  statesEve?: QuantumState[];
+
   basesBob: Basis[];
   bitsBob: Bit[];
+
   kept: boolean[];
-  aliceKey: Bit[];
-  bobKey: Bit[];
+
+  aliceSiftedKey: Bit[];
+  bobSiftedKey: Bit[];
+
+  sampleAlice: Bit[];
+  sampleBob: Bit[];
+
+  aliceRemainingKey: Bit[];
+  bobRemainingKey: Bit[];
+
+  qber: number;
+  protocolAccepted: boolean;
 };
 
 
-// Génère un bit aléatoire
+// --------------------------------------------------
+// Random generation
+// --------------------------------------------------
+
 function randomBit(): Bit {
   const values = new Uint32Array(1);
   crypto.getRandomValues(values);
@@ -27,13 +47,11 @@ function randomBit(): Bit {
 }
 
 
-// Génère n bits aléatoires
 function generateBits(n: number): Bit[] {
   return Array.from({ length: n }, () => randomBit());
 }
 
 
-// Génère n bases aléatoires Z ou X
 function generateBases(n: number): Basis[] {
   return Array.from(
     { length: n },
@@ -42,7 +60,10 @@ function generateBases(n: number): Basis[] {
 }
 
 
-// Correspondance bit + base -> état quantique
+// --------------------------------------------------
+// Quantum states
+// --------------------------------------------------
+
 function prepareStates(
   bits: Bit[],
   bases: Basis[]
@@ -57,15 +78,18 @@ function prepareStates(
 }
 
 
-// Mesures de Bob
+// --------------------------------------------------
+// Measurement
+// --------------------------------------------------
+
 function measure(
   states: QuantumState[],
-  basesBob: Basis[]
+  measurementBases: Basis[]
 ): Bit[] {
   return states.map((state, i) => {
-    const base = basesBob[i];
+    const base = measurementBases[i];
 
-    // Bonne base Z
+    // Same Z basis
     if (base === "Z" && state === "H") {
       return 0;
     }
@@ -74,7 +98,7 @@ function measure(
       return 1;
     }
 
-    // Bonne base X
+    // Same X basis
     if (base === "X" && state === "+") {
       return 0;
     }
@@ -83,13 +107,16 @@ function measure(
       return 1;
     }
 
-    // Mauvaise base -> résultat aléatoire
+    // Different basis -> random result
     return randomBit();
   });
 }
 
 
+// --------------------------------------------------
 // Sifting
+// --------------------------------------------------
+
 function siftKey(
   bits: Bit[],
   basesAlice: Basis[],
@@ -101,7 +128,131 @@ function siftKey(
 }
 
 
-// Petite ligne graphique réutilisable
+// --------------------------------------------------
+// QBER
+// --------------------------------------------------
+
+function calculateQber(
+  aliceKey: Bit[],
+  bobKey: Bit[]
+): number {
+  if (aliceKey.length === 0) {
+    return 0;
+  }
+
+  let errors = 0;
+
+  for (let i = 0; i < aliceKey.length; i++) {
+    if (aliceKey[i] !== bobKey[i]) {
+      errors++;
+    }
+  }
+
+  return errors / aliceKey.length;
+}
+
+
+// Random sample without replacement
+function randomSampleIndices(
+  length: number,
+  sampleSize: number
+): number[] {
+  const indices = Array.from(
+    { length },
+    (_, i) => i
+  );
+
+  // Fisher-Yates shuffle
+  for (let i = indices.length - 1; i > 0; i--) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+
+    const j = values[0] % (i + 1);
+
+    [indices[i], indices[j]] = [
+      indices[j],
+      indices[i],
+    ];
+  }
+
+  return indices.slice(0, sampleSize);
+}
+
+
+function estimateQber(
+  aliceKey: Bit[],
+  bobKey: Bit[],
+  proportion = 0.2
+) {
+  if (aliceKey.length === 0) {
+    return {
+      qber: 0,
+      sampleAlice: [] as Bit[],
+      sampleBob: [] as Bit[],
+      aliceRemainingKey: [] as Bit[],
+      bobRemainingKey: [] as Bit[],
+    };
+  }
+
+  const sampleSize = Math.max(
+    1,
+    Math.floor(aliceKey.length * proportion)
+  );
+
+  const sampleIndices = randomSampleIndices(
+    aliceKey.length,
+    sampleSize
+  );
+
+  const sampleSet = new Set(sampleIndices);
+
+  const sampleAlice = sampleIndices.map(
+    (i) => aliceKey[i]
+  );
+
+  const sampleBob = sampleIndices.map(
+    (i) => bobKey[i]
+  );
+
+  const qber = calculateQber(
+    sampleAlice,
+    sampleBob
+  );
+
+  const aliceRemainingKey = aliceKey.filter(
+    (_, i) => !sampleSet.has(i)
+  );
+
+  const bobRemainingKey = bobKey.filter(
+    (_, i) => !sampleSet.has(i)
+  );
+
+  return {
+    qber,
+    sampleAlice,
+    sampleBob,
+    aliceRemainingKey,
+    bobRemainingKey,
+  };
+}
+
+
+// --------------------------------------------------
+// QBER threshold
+// --------------------------------------------------
+
+function verifyQber(
+  qber: number,
+  threshold = 0.11
+): boolean {
+  return qber <= threshold;
+}
+
+
+// --------------------------------------------------
+// UI row
+// --------------------------------------------------
+
 function DataRow({
   label,
   values,
@@ -130,64 +281,159 @@ function DataRow({
 }
 
 
+// --------------------------------------------------
+// Component
+// --------------------------------------------------
+
 export default function BB84Demo() {
-  const [numberOfBits, setNumberOfBits] = useState(8);
+  const [numberOfBits, setNumberOfBits] =
+    useState(32);
+
+  const [eveActive, setEveActive] =
+    useState(false);
 
   const [result, setResult] =
     useState<SimulationResult | null>(null);
 
 
   function runSimulation() {
+
+    // -------------------------
     // Alice
-    const bitsAlice = generateBits(numberOfBits);
-    const basesAlice = generateBases(numberOfBits);
+    // -------------------------
 
-    const statesAlice = prepareStates(
-      bitsAlice,
-      basesAlice
-    );
+    const bitsAlice =
+      generateBits(numberOfBits);
 
+    const basesAlice =
+      generateBases(numberOfBits);
+
+    const statesAlice =
+      prepareStates(
+        bitsAlice,
+        basesAlice
+      );
+
+
+    // States actually transmitted to Bob
+    let transmittedStates = statesAlice;
+
+    let basesEve: Basis[] | undefined;
+    let bitsEve: Bit[] | undefined;
+    let statesEve: QuantumState[] | undefined;
+
+
+    // -------------------------
+    // Eve
+    // -------------------------
+
+    if (eveActive) {
+      basesEve =
+        generateBases(numberOfBits);
+
+      bitsEve =
+        measure(
+          statesAlice,
+          basesEve
+        );
+
+      statesEve =
+        prepareStates(
+          bitsEve,
+          basesEve
+        );
+
+      transmittedStates = statesEve;
+    }
+
+
+    // -------------------------
     // Bob
-    const basesBob = generateBases(numberOfBits);
+    // -------------------------
 
-    const bitsBob = measure(
-      statesAlice,
-      basesBob
-    );
+    const basesBob =
+      generateBases(numberOfBits);
 
+    const bitsBob =
+      measure(
+        transmittedStates,
+        basesBob
+      );
+
+
+    // -------------------------
     // Sifting
+    // -------------------------
+
     const kept = basesAlice.map(
-      (base, i) => base === basesBob[i]
+      (base, i) =>
+        base === basesBob[i]
     );
 
-    const aliceKey = siftKey(
-      bitsAlice,
-      basesAlice,
-      basesBob
+    const aliceSiftedKey =
+      siftKey(
+        bitsAlice,
+        basesAlice,
+        basesBob
+      );
+
+    const bobSiftedKey =
+      siftKey(
+        bitsBob,
+        basesAlice,
+        basesBob
+      );
+
+
+    // -------------------------
+    // QBER estimation
+    // -------------------------
+
+    const {
+      qber,
+      sampleAlice,
+      sampleBob,
+      aliceRemainingKey,
+      bobRemainingKey,
+    } = estimateQber(
+      aliceSiftedKey,
+      bobSiftedKey,
+      0.2
     );
 
-    const bobKey = siftKey(
-      bitsBob,
-      basesAlice,
-      basesBob
-    );
+
+    const protocolAccepted =
+      verifyQber(qber);
+
 
     setResult({
       bitsAlice,
       basesAlice,
       statesAlice,
+
+      eveActive,
+      basesEve,
+      bitsEve,
+      statesEve,
+
       basesBob,
       bitsBob,
+
       kept,
-      aliceKey,
-      bobKey,
+
+      aliceSiftedKey,
+      bobSiftedKey,
+
+      sampleAlice,
+      sampleBob,
+
+      aliceRemainingKey,
+      bobRemainingKey,
+
+      qber,
+      protocolAccepted,
     });
   }
-
-
-  const keysMatch =
-    result !== null &&
-    result.aliceKey.join("") === result.bobKey.join("");
 
 
   return (
@@ -207,34 +453,63 @@ export default function BB84Demo() {
           </h4>
 
           <p className="mt-2 text-sm text-gray-500">
-            Ideal channel · No eavesdropper
+            {eveActive
+              ? "Intercept-resend attack enabled"
+              : "Ideal channel · No eavesdropper"}
           </p>
         </div>
 
 
-        {/* Nombre de bits */}
+        {/* Eve toggle */}
+
+        <label className="flex cursor-pointer items-center gap-3">
+
+          <input
+            type="checkbox"
+            checked={eveActive}
+            onChange={(e) =>
+              setEveActive(e.target.checked)
+            }
+            className="h-4 w-4"
+          />
+
+          <span className="text-sm text-gray-300">
+            Enable Eve
+          </span>
+
+        </label>
+
+
+        {/* Number of bits */}
 
         <div className="w-full max-w-xs">
+
           <div className="mb-2 flex justify-between text-sm">
+
             <span className="text-gray-400">
-              Number of bits
+              Number of photons
             </span>
 
             <span className="text-blue-400">
               {numberOfBits}
             </span>
+
           </div>
 
           <input
             type="range"
-            min="4"
-            max="32"
+            min="8"
+            max="128"
+            step="8"
             value={numberOfBits}
             onChange={(e) =>
-              setNumberOfBits(Number(e.target.value))
+              setNumberOfBits(
+                Number(e.target.value)
+              )
             }
             className="w-full"
           />
+
         </div>
 
 
@@ -244,22 +519,26 @@ export default function BB84Demo() {
         >
           Run simulation
         </button>
+
       </div>
 
 
-      {/* Résultats */}
+      {/* Results */}
 
       {result && (
         <div className="mt-10">
 
+
           {/* Alice */}
 
           <div>
+
             <p className="mb-4 font-medium text-blue-400">
               Alice
             </p>
 
             <div className="overflow-x-auto pb-3">
+
               <div className="min-w-max space-y-3">
 
                 <DataRow
@@ -278,29 +557,94 @@ export default function BB84Demo() {
                 />
 
               </div>
+
             </div>
+
           </div>
 
 
           {/* Transmission */}
 
           <div className="my-7 flex items-center gap-4 text-xs uppercase tracking-widest text-gray-600">
+
             <div className="h-px flex-1 bg-white/10" />
 
             Quantum channel →
 
             <div className="h-px flex-1 bg-white/10" />
+
           </div>
+
+
+          {/* Eve */}
+
+          {result.eveActive &&
+            result.basesEve &&
+            result.bitsEve &&
+            result.statesEve && (
+
+            <div>
+
+              <div className="mb-4 flex items-center gap-3">
+
+                <p className="font-medium text-red-400">
+                  Eve
+                </p>
+
+                <span className="rounded-full border border-red-400/20 bg-red-400/10 px-2 py-1 text-xs text-red-300">
+                  Intercept · Measure · Resend
+                </span>
+
+              </div>
+
+              <div className="overflow-x-auto pb-3">
+
+                <div className="min-w-max space-y-3">
+
+                  <DataRow
+                    label="Bases"
+                    values={result.basesEve}
+                  />
+
+                  <DataRow
+                    label="Results"
+                    values={result.bitsEve}
+                  />
+
+                  <DataRow
+                    label="Resent"
+                    values={result.statesEve}
+                  />
+
+                </div>
+
+              </div>
+
+              <div className="my-7 flex items-center gap-4 text-xs uppercase tracking-widest text-red-400/60">
+
+                <div className="h-px flex-1 bg-red-400/10" />
+
+                Resent states →
+
+                <div className="h-px flex-1 bg-red-400/10" />
+
+              </div>
+
+            </div>
+
+          )}
 
 
           {/* Bob */}
 
           <div>
+
             <p className="mb-4 font-medium text-purple-400">
               Bob
             </p>
 
             <div className="overflow-x-auto pb-3">
+
               <div className="min-w-max space-y-3">
 
                 <DataRow
@@ -314,7 +658,9 @@ export default function BB84Demo() {
                 />
 
               </div>
+
             </div>
+
           </div>
 
 
@@ -327,66 +673,208 @@ export default function BB84Demo() {
             </p>
 
             <div className="overflow-x-auto pb-3">
+
               <DataRow
                 label="Keep"
-                values={result.kept.map((keep) =>
-                  keep ? "✓" : "×"
+                values={result.kept.map(
+                  (keep) =>
+                    keep ? "✓" : "×"
                 )}
               />
+
+            </div>
+
+
+            <div className="mt-5 space-y-2 font-mono text-sm">
+
+              <p>
+                <span className="text-gray-500">
+                  Alice:
+                </span>{" "}
+                {result.aliceSiftedKey.join("")}
+              </p>
+
+              <p>
+                <span className="text-gray-500">
+                  Bob:
+                </span>{" "}
+                {result.bobSiftedKey.join("")}
+              </p>
+
             </div>
 
           </div>
 
 
-          {/* Clé */}
+          {/* QBER */}
 
           <div className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-5">
 
             <p className="text-sm uppercase tracking-widest text-gray-500">
-              Shared key
+              QBER estimation
             </p>
 
-            {result.aliceKey.length > 0 ? (
-              <>
-                <div className="mt-4 space-y-2 font-mono">
 
-                  <p>
-                    <span className="text-gray-500">
-                      Alice:
-                    </span>{" "}
-                    {result.aliceKey.join("")}
+            {result.aliceSiftedKey.length > 0 ? (
+              <>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-3">
+
+                  <div>
+                    <p className="text-xs text-gray-500">
+                      Public sample
+                    </p>
+
+                    <p className="mt-1 font-mono">
+                      {result.sampleAlice.length} bits
+                    </p>
+                  </div>
+
+
+                  <div>
+                    <p className="text-xs text-gray-500">
+                      Estimated QBER
+                    </p>
+
+                    <p className="mt-1 text-xl font-semibold">
+                      {(result.qber * 100).toFixed(2)}%
+                    </p>
+                  </div>
+
+
+                  <div>
+                    <p className="text-xs text-gray-500">
+                      Security threshold
+                    </p>
+
+                    <p className="mt-1 text-xl font-semibold">
+                      11%
+                    </p>
+                  </div>
+
+                </div>
+
+
+                {/* Public sample */}
+
+                <div className="mt-6 border-t border-white/10 pt-5">
+
+                  <p className="mb-3 text-xs uppercase tracking-widest text-gray-500">
+                    Publicly revealed sample
                   </p>
 
-                  <p>
-                    <span className="text-gray-500">
-                      Bob:
-                    </span>{" "}
-                    {result.bobKey.join("")}
+                  <div className="space-y-2 font-mono text-sm">
+
+                    <p>
+                      <span className="text-gray-500">
+                        Alice:
+                      </span>{" "}
+                      {result.sampleAlice.join("")}
+                    </p>
+
+                    <p>
+                      <span className="text-gray-500">
+                        Bob:
+                      </span>{" "}
+                      {result.sampleBob.join("")}
+                    </p>
+
+                  </div>
+
+                </div>
+
+
+                {/* Decision */}
+
+                <div
+                  className={`mt-6 rounded-xl border p-4 ${
+                    result.protocolAccepted
+                      ? "border-green-400/20 bg-green-400/5"
+                      : "border-red-400/20 bg-red-400/5"
+                  }`}
+                >
+
+                  <p
+                    className={`font-medium ${
+                      result.protocolAccepted
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }`}
+                  >
+                    {result.protocolAccepted
+                      ? "✓ QBER acceptable — protocol continues"
+                      : "✕ QBER too high — protocol aborted"}
                   </p>
 
                 </div>
 
-                <p
-                  className={`mt-4 text-sm ${
-                    keysMatch
-                      ? "text-green-400"
-                      : "text-red-400"
-                  }`}
-                >
-                  {keysMatch
-                    ? "✓ Keys match"
-                    : "✕ Keys do not match"}
-                </p>
+
+                {/* Remaining candidate key */}
+
+                {result.protocolAccepted ? (
+
+                  <div className="mt-6 border-t border-white/10 pt-5">
+
+                    <p className="text-xs uppercase tracking-widest text-gray-500">
+                      Remaining candidate key
+                    </p>
+
+                    <div className="mt-3 space-y-2 font-mono text-sm">
+
+                      <p>
+                        <span className="text-gray-500">
+                          Alice:
+                        </span>{" "}
+                        {result.aliceRemainingKey.join("") || "—"}
+                      </p>
+
+                      <p>
+                        <span className="text-gray-500">
+                          Bob:
+                        </span>{" "}
+                        {result.bobRemainingKey.join("") || "—"}
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                ) : (
+
+                  <div className="mt-6 border-t border-white/10 pt-5">
+
+                    <p className="text-sm text-red-400">
+                      Remaining key discarded because the protocol was aborted.
+                    </p>
+
+                  </div>
+
+                )}
+
               </>
             ) : (
+
               <p className="mt-4 text-sm text-gray-400">
                 No matching bases in this run. Try again.
               </p>
+
             )}
 
           </div>
+
+
+          {/* Statistical note */}
+
+          <p className="mt-4 text-xs leading-relaxed text-gray-500">
+            Small simulations may show strong statistical
+            fluctuations. With a full intercept-resend attack,
+            the QBER approaches approximately 25% as the number
+            of transmitted photons increases.
+          </p>
+
         </div>
       )}
+
     </div>
   );
 }

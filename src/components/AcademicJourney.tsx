@@ -25,7 +25,8 @@ const areas = [
       "Functional Programming",
       "Data Structures",
       "Databases",
-      "Algorithms"
+      "Algorithms",
+      "Calculability & Complexity"
     ],
   },
 

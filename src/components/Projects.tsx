@@ -31,9 +31,9 @@ export default function Projects() {
           </h3>
 
           <p className="mt-4 max-w-2xl leading-7 text-gray-400">
-            Educational Python simulation of the BB84 quantum key distribution
-            protocol, including quantum-state preparation, measurement and
-            basis reconciliation to generate a shared secret key.
+            Interactive educational simulation of the BB84 quantum key distribution
+            protocol, from quantum-state preparation and basis reconciliation to
+            intercept-resend attacks and QBER-based eavesdropping detection.
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
@@ -55,8 +55,8 @@ export default function Projects() {
               CURRENT VERSION
             </p>
 
-            <p className="mt-2 text-gray-300">
-              V1 · BB84 without eavesdropping
+            <p className="mt-2 text-gray-300"> 
+              V3 · Eve intercept-resend + QBER
             </p>
 
             <p className="mt-5 text-sm text-gray-500">
@@ -64,7 +64,7 @@ export default function Projects() {
             </p>
 
             <p className="mt-2 text-gray-300">
-              Eve intercept-resend attack + QBER detection
+              V4 · Error correction
             </p>
           </div>
           <BB84Demo />
