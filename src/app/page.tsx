@@ -6,6 +6,8 @@ import LearningNow from "@/components/LearningNow";
 import QuoteOfTheDay from "@/components/QuoteOfTheDay";
 import AcademicJourney from "@/components/AcademicJourney";
 import Projects from "@/components/Projects";
+import Skills from "@/components/Skills";
+import Contact from "@/components/Contact";
 
 export default function Home() {
   return (
@@ -20,6 +22,8 @@ export default function Home() {
         <LearningNow />
         <Projects />
         <AcademicJourney />
+        <Skills />
+        <Contact />
       </main>
     </div>
   );

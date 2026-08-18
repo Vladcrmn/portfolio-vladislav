@@ -31,9 +31,10 @@ export default function Projects() {
           </h3>
 
           <p className="mt-4 max-w-2xl leading-7 text-gray-400">
-            Interactive educational simulation of the BB84 quantum key distribution
-            protocol, from quantum-state preparation and basis reconciliation to
-            intercept-resend attacks and QBER-based eavesdropping detection.
+            An interactive educational simulation of the BB84 protocol,
+            featuring quantum-state preparation, basis reconciliation,
+            an intercept-resend attack, QBER estimation,
+            parity-based error correction, and SHA-256 privacy amplification.
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
@@ -43,6 +44,10 @@ export default function Projects() {
 
             <span className="rounded-full border border-white/10 px-3 py-1 text-sm text-gray-300">
               QKD
+            </span>
+
+            <span className="rounded-full border border-white/10 px-3 py-1 text-sm text-gray-300">
+              SHA-256
             </span>
 
             <span className="rounded-full border border-white/10 px-3 py-1 text-sm text-gray-300">
@@ -56,16 +61,10 @@ export default function Projects() {
             </p>
 
             <p className="mt-2 text-gray-300"> 
-              V3 · Eve intercept-resend + QBER
+              V4 · Complete
             </p>
 
-            <p className="mt-5 text-sm text-gray-500">
-              NEXT UPDATE
-            </p>
-
-            <p className="mt-2 text-gray-300">
-              V4 · Error correction
-            </p>
+            
           </div>
           <BB84Demo />
 

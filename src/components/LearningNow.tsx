@@ -3,7 +3,7 @@ export default function LearningNow() {
     {
       title: "Quantum Cryptography",
       description:
-        "Deepening my understanding of quantum key distribution, BB84 security, eavesdropping detection and QBER.",
+        "Extending the knowledge gained from my BB84 simulator toward advanced QKD protocols, finite-key security, and practical implementations.",
       status: "Currently studying",
     },
     {

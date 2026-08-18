@@ -93,11 +93,11 @@ export default function Hero() {
     <div className="absolute -right-2 -top-[7px] h-4 w-4 rounded-full bg-purple-300 shadow-[0_0_20px_rgba(216,180,254,0.9)]" />
     </div>
 
-    <span className="absolute -top-8 text-sm text-gray-400">
+    <span className="absolute -top-10 left-1/2 z-10 -translate-x-1/2 bg-[#08111f] px-2 text-sm text-gray-400">
       |0⟩
     </span>
 
-    <span className="absolute -bottom-8 text-sm text-gray-400">
+    <span className="absolute -bottom-10 left-1/2 z-10 -translate-x-1/2 bg-[#08111f] px-2 text-sm text-gray-400">
       |1⟩
     </span>
 

@@ -32,6 +32,13 @@ type SimulationResult = {
 
   qber: number;
   protocolAccepted: boolean;
+
+  bobCorrectedKey: Bit[];
+  errorCorrectionSuccessful: boolean;
+
+  finalAliceKey: Bit[];
+  finalBobKey: Bit[];
+  finalKeysIdentical: boolean;
 };
 
 
@@ -250,6 +257,159 @@ function verifyQber(
 
 
 // --------------------------------------------------
+// V4 — Error correction
+// --------------------------------------------------
+
+function calculateParity(block: Bit[]): Bit {
+  const sum = block.reduce<number>(
+    (total, bit) => total + bit,
+    0
+  );
+
+  return (sum % 2) as Bit;
+}
+
+
+function splitIntoBlocks(
+  key: Bit[],
+  blockSize: number
+): Bit[][] {
+  const blocks: Bit[][] = [];
+
+  for (let i = 0; i < key.length; i += blockSize) {
+    blocks.push(key.slice(i, i + blockSize));
+  }
+
+  return blocks;
+}
+
+
+function findDifferentBlocks(
+  aliceKey: Bit[],
+  bobKey: Bit[],
+  blockSize: number
+): number[] {
+  const aliceBlocks = splitIntoBlocks(aliceKey, blockSize);
+  const bobBlocks = splitIntoBlocks(bobKey, blockSize);
+  const differentBlocks: number[] = [];
+
+  for (let i = 0; i < aliceBlocks.length; i++) {
+    if (
+      calculateParity(aliceBlocks[i]) !==
+      calculateParity(bobBlocks[i])
+    ) {
+      differentBlocks.push(i);
+    }
+  }
+
+  return differentBlocks;
+}
+
+
+function locateError(
+  aliceBlock: Bit[],
+  bobBlock: Bit[]
+): number {
+  let alicePart = [...aliceBlock];
+  let bobPart = [...bobBlock];
+  let position = 0;
+
+  while (alicePart.length > 1) {
+    const middle = Math.floor(alicePart.length / 2);
+    const aliceLeft = alicePart.slice(0, middle);
+    const bobLeft = bobPart.slice(0, middle);
+
+    if (calculateParity(aliceLeft) !== calculateParity(bobLeft)) {
+      alicePart = aliceLeft;
+      bobPart = bobLeft;
+    } else {
+      alicePart = alicePart.slice(middle);
+      bobPart = bobPart.slice(middle);
+      position += middle;
+    }
+  }
+
+  return position;
+}
+
+
+function correctErrors(
+  aliceKey: Bit[],
+  bobKey: Bit[],
+  blockSize: number
+): Bit[] {
+  const correctedBobKey = [...bobKey];
+  const aliceBlocks = splitIntoBlocks(aliceKey, blockSize);
+  const bobBlocks = splitIntoBlocks(correctedBobKey, blockSize);
+
+  const differentBlocks = findDifferentBlocks(
+    aliceKey,
+    correctedBobKey,
+    blockSize
+  );
+
+  for (const blockIndex of differentBlocks) {
+    const localPosition = locateError(
+      aliceBlocks[blockIndex],
+      bobBlocks[blockIndex]
+    );
+
+    const globalPosition =
+      blockIndex * blockSize + localPosition;
+
+    correctedBobKey[globalPosition] =
+      correctedBobKey[globalPosition] === 0 ? 1 : 0;
+  }
+
+  return correctedBobKey;
+}
+
+
+function keysAreEqual(
+  aliceKey: Bit[],
+  bobKey: Bit[]
+): boolean {
+  return (
+    aliceKey.length === bobKey.length &&
+    aliceKey.every((bit, i) => bit === bobKey[i])
+  );
+}
+
+
+// --------------------------------------------------
+// V4 — Privacy amplification
+// --------------------------------------------------
+
+function keyToText(key: Bit[]): string {
+  return key.join("");
+}
+
+
+async function hashKey(key: Bit[]): Promise<Bit[]> {
+  const encodedKey = new TextEncoder().encode(keyToText(key));
+  const digest = await crypto.subtle.digest("SHA-256", encodedKey);
+
+  return Array.from(new Uint8Array(digest)).flatMap((byte) =>
+    Array.from(
+      { length: 8 },
+      (_, i) => ((byte >> (7 - i)) & 1) as Bit
+    )
+  );
+}
+
+
+async function privacyAmplification(key: Bit[]): Promise<Bit[]> {
+  const hashBits = await hashKey(key);
+  const finalLength = Math.min(
+    256,
+    Math.floor(key.length / 2)
+  );
+
+  return hashBits.slice(0, finalLength);
+}
+
+
+// --------------------------------------------------
 // UI row
 // --------------------------------------------------
 
@@ -287,7 +447,7 @@ function DataRow({
 
 export default function BB84Demo() {
   const [numberOfBits, setNumberOfBits] =
-    useState(32);
+    useState(128);
 
   const [eveActive, setEveActive] =
     useState(false);
@@ -296,7 +456,7 @@ export default function BB84Demo() {
     useState<SimulationResult | null>(null);
 
 
-  function runSimulation() {
+  async function runSimulation() {
 
     // -------------------------
     // Alice
@@ -406,6 +566,42 @@ export default function BB84Demo() {
       verifyQber(qber);
 
 
+    // -------------------------
+    // V4 post-processing
+    // -------------------------
+
+    let bobCorrectedKey: Bit[] = [];
+    let errorCorrectionSuccessful = false;
+    let finalAliceKey: Bit[] = [];
+    let finalBobKey: Bit[] = [];
+    let finalKeysIdentical = false;
+
+    if (protocolAccepted) {
+      bobCorrectedKey = correctErrors(
+        aliceRemainingKey,
+        bobRemainingKey,
+        8
+      );
+
+      errorCorrectionSuccessful = keysAreEqual(
+        aliceRemainingKey,
+        bobCorrectedKey
+      );
+
+      if (errorCorrectionSuccessful) {
+        [finalAliceKey, finalBobKey] = await Promise.all([
+          privacyAmplification(aliceRemainingKey),
+          privacyAmplification(bobCorrectedKey),
+        ]);
+
+        finalKeysIdentical = keysAreEqual(
+          finalAliceKey,
+          finalBobKey
+        );
+      }
+    }
+
+
     setResult({
       bitsAlice,
       basesAlice,
@@ -432,6 +628,13 @@ export default function BB84Demo() {
 
       qber,
       protocolAccepted,
+
+      bobCorrectedKey,
+      errorCorrectionSuccessful,
+
+      finalAliceKey,
+      finalBobKey,
+      finalKeysIdentical,
     });
   }
 
@@ -483,34 +686,34 @@ export default function BB84Demo() {
         {/* Number of bits */}
 
         <div className="w-full max-w-xs">
+        <div className="mb-2 flex justify-between text-sm">
+          <span className="text-gray-400">
+            Number of photons
+          </span>
 
-          <div className="mb-2 flex justify-between text-sm">
-
-            <span className="text-gray-400">
-              Number of photons
-            </span>
-
-            <span className="text-blue-400">
-              {numberOfBits}
-            </span>
-
-          </div>
-
-          <input
-            type="range"
-            min="8"
-            max="128"
-            step="8"
-            value={numberOfBits}
-            onChange={(e) =>
-              setNumberOfBits(
-                Number(e.target.value)
-              )
-            }
-            className="w-full"
-          />
-
+          <span className="text-blue-400">
+            {numberOfBits}
+          </span>
         </div>
+
+        <input
+          type="range"
+          min="8"
+          max="128"
+          step="8"
+          value={numberOfBits}
+          onChange={(e) =>
+            setNumberOfBits(Number(e.target.value))
+          }
+          className="w-full"
+        />
+
+        {eveActive && numberOfBits < 64 && (
+          <p className="mt-2 text-xs leading-relaxed text-amber-400">
+            Small sample: Eve may remain undetected because of statistical fluctuations.
+          </p>
+        )}
+      </div>
 
 
         <button
@@ -861,6 +1064,177 @@ export default function BB84Demo() {
             )}
 
           </div>
+
+
+          {/* V4 — Error correction */}
+
+          {result.protocolAccepted &&
+            result.aliceRemainingKey.length > 0 && (
+
+            <div className="mt-8 rounded-xl border border-blue-400/20 bg-blue-400/[0.04] p-5">
+
+              <p className="text-sm uppercase tracking-widest text-blue-400">
+                V4 · Error correction
+              </p>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-3">
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Method
+                  </p>
+
+                  <p className="mt-1 text-sm text-gray-200">
+                    Block parity + binary search
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Block size
+                  </p>
+
+                  <p className="mt-1 font-mono text-gray-200">
+                    8 bits
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Reconciliation
+                  </p>
+
+                  <p
+                    className={`mt-1 font-medium ${
+                      result.errorCorrectionSuccessful
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }`}
+                  >
+                    {result.errorCorrectionSuccessful
+                      ? "✓ Successful"
+                      : "✕ Failed"}
+                  </p>
+                </div>
+
+              </div>
+
+              <div className="mt-6 space-y-2 border-t border-white/10 pt-5 font-mono text-sm">
+
+                <p>
+                  <span className="text-gray-500">
+                    Alice:
+                  </span>{" "}
+                  {result.aliceRemainingKey.join("") || "—"}
+                </p>
+
+                <p>
+                  <span className="text-gray-500">
+                    Bob before:
+                  </span>{" "}
+                  {result.bobRemainingKey.join("") || "—"}
+                </p>
+
+                <p>
+                  <span className="text-gray-500">
+                    Bob corrected:
+                  </span>{" "}
+                  {result.bobCorrectedKey.join("") || "—"}
+                </p>
+
+              </div>
+
+              {!result.errorCorrectionSuccessful && (
+                <p className="mt-5 text-sm text-red-400">
+                  Reconciliation failed — the remaining key is discarded.
+                </p>
+              )}
+
+            </div>
+
+          )}
+
+
+          {/* V4 — Privacy amplification */}
+
+          {result.protocolAccepted &&
+            result.errorCorrectionSuccessful && (
+
+            <div className="mt-8 rounded-xl border border-green-400/20 bg-green-400/[0.04] p-5">
+
+              <p className="text-sm uppercase tracking-widest text-green-400">
+                V4 · Privacy amplification
+              </p>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-3">
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Hash function
+                  </p>
+
+                  <p className="mt-1 font-medium text-gray-200">
+                    SHA-256
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Before
+                  </p>
+
+                  <p className="mt-1 font-mono text-gray-200">
+                    {result.aliceRemainingKey.length} bits
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Final key
+                  </p>
+
+                  <p className="mt-1 font-mono text-gray-200">
+                    {result.finalAliceKey.length} bits
+                  </p>
+                </div>
+
+              </div>
+
+              <div className="mt-6 space-y-2 border-t border-white/10 pt-5 font-mono text-sm">
+
+                <p>
+                  <span className="text-gray-500">
+                    Alice:
+                  </span>{" "}
+                  {result.finalAliceKey.join("") || "—"}
+                </p>
+
+                <p>
+                  <span className="text-gray-500">
+                    Bob:
+                  </span>{" "}
+                  {result.finalBobKey.join("") || "—"}
+                </p>
+
+              </div>
+
+              <p
+                className={`mt-5 font-medium ${
+                  result.finalKeysIdentical
+                    ? "text-green-400"
+                    : "text-red-400"
+                }`}
+              >
+                {result.finalKeysIdentical
+                  ? "✓ Final shared keys are identical"
+                  : "✕ Final keys do not match"}
+              </p>
+
+            </div>
+
+          )}
+
+
 
 
           {/* Statistical note */}
