@@ -18,6 +18,10 @@ export default function Navbar() {
         Learning
         </a>
 
+        <a href="#projects" className="transition hover:text-white">
+        Projects
+        </a>
+
         <a href="#journey" className="transition hover:text-white">
           Journey
         </a>
