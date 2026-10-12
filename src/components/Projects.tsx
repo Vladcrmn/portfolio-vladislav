@@ -54,7 +54,35 @@ export default function Projects() {
         <p className="text-sm text-gray-500">{projects.length} interactive projects</p>
       </div>
 
-      <div className="mt-10 grid gap-4 md:grid-cols-2" role="tablist" aria-label="Interactive projects">
+      <article className="mt-10 rounded-2xl border border-blue-400/30 bg-blue-400/[0.06] p-6 sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-blue-300">
+            Bachelor thesis · University of Geneva
+          </p>
+          <span className="rounded-full border border-blue-400/30 px-3 py-1 text-xs text-blue-300">
+            In progress
+          </span>
+        </div>
+        <h3 className="mt-4 text-2xl font-semibold text-white sm:text-3xl">
+          Bitcoin &amp; Post-Quantum Cryptography
+        </h3>
+        <p className="mt-4 max-w-3xl leading-7 text-gray-400">
+          I have started my bachelor thesis on Bitcoin security in the context of
+          quantum computing. My work focuses on existing proposals for
+          post-quantum protection and the challenges of migrating Bitcoin to
+          quantum-resistant cryptography. Alongside this, I am studying the
+          quantum algorithms that lead to Shor&apos;s algorithm.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {["Bitcoin", "Post-quantum cryptography", "Shor’s algorithm"].map((tag) => (
+            <span key={tag} className="rounded-full border border-white/10 px-3 py-1 text-xs text-gray-400">
+              {tag}
+            </span>
+          ))}
+        </div>
+      </article>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-2" role="tablist" aria-label="Interactive projects">
         {projects.map((project) => {
           const selected = project.id === selectedProject;
           const isViolet = project.accent === "violet";
